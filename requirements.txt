@@ -1,0 +1,5 @@
+Flask
+Flask-Bcrypt
+Flask-JWT-Extended
+psycopg2
+flask-cors
