@@ -115,6 +115,40 @@ def is_user_subscribed(user_id):
     conn.close()
     return user and user['is_subscribed']
 
+# View a single solar panel with owner details
+@app.route('/solar-panels/<int:panel_id>', methods=['GET'])
+@jwt_required()
+def view_solar_panel(panel_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT sp.id, sp.name, sp.description, sp.rental_price_per_day, sp.owner_id, sp.product_type, "
+        "sp.serial_number, sp.location, sp.is_available, ur.full_name as owner_name "
+        "FROM solar_panels sp "
+        "JOIN user_rent ur ON sp.owner_id = ur.id "
+        "WHERE sp.id = %s",
+        (panel_id,)
+    )
+    panel = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not panel:
+        return jsonify({'message': 'Solar panel not found'}), 404
+
+    return jsonify({
+        'id': panel['id'],
+        'name': panel['name'],
+        'description': panel['description'],
+        'rental_price_per_day': float(panel['rental_price_per_day']),
+        'owner_id': panel['owner_id'],
+        'owner_name': panel['owner_name'],
+        'product_type': panel['product_type'],
+        'serial_number': panel['serial_number'],
+        'location': panel['location'],
+        'is_available': panel['is_available']
+    }), 200
+
 # List all available solar panels
 @app.route('/solar-panels', methods=['GET'])
 @jwt_required()
