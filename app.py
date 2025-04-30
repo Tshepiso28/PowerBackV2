@@ -38,7 +38,6 @@ def get_db_connection():
         cursor_factory=extras.DictCursor
     )
 
-# Sign-up Route
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
@@ -72,7 +71,6 @@ def signup():
 
     return jsonify({'message': 'User created successfully'}), 201
 
-# Sign-in Route
 @app.route('/signin', methods=['POST'])
 def signin():
     data = request.get_json()
@@ -98,7 +96,6 @@ def signin():
     conn.close()
     return jsonify({'message': 'Invalid credentials'}), 401
 
-# Sign-out Route
 @app.route('/signout', methods=['POST'])
 @jwt_required()
 def signout():
@@ -115,7 +112,6 @@ def is_user_subscribed(user_id):
     conn.close()
     return user and user['is_subscribed']
 
-# View a single solar panel with owner details
 @app.route('/solar-panels/<int:panel_id>', methods=['GET'])
 @jwt_required()
 def view_solar_panel(panel_id):
@@ -134,7 +130,7 @@ def view_solar_panel(panel_id):
     conn.close()
 
     if not panel:
-        return jsonify({'message': 'Solar panel not found'}), 404
+        return jsonify({'message': 'Power Source not found'}), 404
 
     return jsonify({
         'id': panel['id'],
@@ -149,7 +145,6 @@ def view_solar_panel(panel_id):
         'is_available': panel['is_available']
     }), 200
 
-# List all available solar panels
 @app.route('/solar-panels', methods=['GET'])
 @jwt_required()
 def list_solar_panels():
@@ -175,13 +170,12 @@ def list_solar_panels():
         } for panel in panels
     ]), 200
 
-# List all solar panels owned by the user
 @app.route('/solar-panels/owned', methods=['GET'])
 @jwt_required()
 def list_owned_solar_panels():
     user_id = get_jwt_identity()
     if not is_user_subscribed(user_id):
-        return jsonify({'message': 'Subscription required to view owned solar panels'}), 403
+        return jsonify({'message': 'Subscription required to view owned Power Source'}), 403
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -207,13 +201,12 @@ def list_owned_solar_panels():
         } for panel in panels
     ]), 200
 
-# Add a new solar panel (subscribed users only)
 @app.route('/solar-panels', methods=['POST'])
 @jwt_required()
 def add_solar_panel():
     user_id = get_jwt_identity()
     if not is_user_subscribed(user_id):
-        return jsonify({'message': 'Subscription required to add solar panels'}), 403
+        return jsonify({'message': 'Subscription required to add Power Source'}), 403
     
     data = request.get_json()
     name = data.get('name')
@@ -223,7 +216,6 @@ def add_solar_panel():
     serial_number = data.get('serial_number')
     location = data.get('location')
     
-    # Validate required fields
     if not all([name, rental_price_per_day, product_type, serial_number]) or \
        not isinstance(rental_price_per_day, (int, float)) or rental_price_per_day <= 0:
         return jsonify({'message': 'Invalid or missing required fields'}), 400
@@ -248,20 +240,18 @@ def add_solar_panel():
         cursor.close()
         conn.close()
     
-    return jsonify({'message': 'Solar panel added successfully', 'panel_id': panel_id}), 201
+    return jsonify({'message': 'Power Source added successfully', 'panel_id': panel_id}), 201
 
-# Update a solar panel (subscribed users only)
 @app.route('/solar-panels/<int:panel_id>', methods=['PATCH'])
 @jwt_required()
 def update_solar_panel(panel_id):
     user_id = get_jwt_identity()
     if not is_user_subscribed(user_id):
-        return jsonify({'message': 'Subscription required to update solar panels'}), 403
+        return jsonify({'message': 'Subscription required to update Power Source'}), 403
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if panel exists and belongs to the user
     cursor.execute(
         "SELECT owner_id FROM solar_panels WHERE id = %s",
         (panel_id,)
@@ -271,12 +261,12 @@ def update_solar_panel(panel_id):
     if not panel:
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Solar panel not found'}), 404
+        return jsonify({'message': 'Power Source not found'}), 404
     
     if panel['owner_id'] != int(user_id):
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Unauthorized to update this solar panel'}), 403
+        return jsonify({'message': 'Unauthorized to update this Power Source'}), 403
     
     data = request.get_json()
     name = data.get('name')
@@ -287,7 +277,6 @@ def update_solar_panel(panel_id):
     serial_number = data.get('serial_number')
     location = data.get('location')
     
-    # Validate inputs
     if rental_price_per_day is not None and (not isinstance(rental_price_per_day, (int, float)) or rental_price_per_day <= 0):
         cursor.close()
         conn.close()
@@ -298,7 +287,6 @@ def update_solar_panel(panel_id):
         conn.close()
         return jsonify({'message': 'Invalid availability status'}), 400
     
-    # Build dynamic update query
     updates = []
     params = []
     if name:
@@ -344,20 +332,18 @@ def update_solar_panel(panel_id):
         cursor.close()
         conn.close()
     
-    return jsonify({'message': 'Solar panel updated successfully'}), 200
+    return jsonify({'message': 'Power Source updated successfully'}), 200
 
-# Delete a solar panel (subscribed users only)
 @app.route('/solar-panels/<int:panel_id>', methods=['DELETE'])
 @jwt_required()
 def delete_solar_panel(panel_id):
     user_id = get_jwt_identity()
     if not is_user_subscribed(user_id):
-        return jsonify({'message': 'Subscription required to delete solar panels'}), 403
+        return jsonify({'message': 'Subscription required to delete Power Source'}), 403
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if panel exists and belongs to the user
     cursor.execute(
         "SELECT owner_id FROM solar_panels WHERE id = %s",
         (panel_id,)
@@ -367,14 +353,13 @@ def delete_solar_panel(panel_id):
     if not panel:
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Solar panel not found'}), 404
+        return jsonify({'message': 'Power Source not found'}), 404
     
     if panel['owner_id'] != int(user_id):
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Unauthorized to delete this solar panel'}), 403
+        return jsonify({'message': 'Unauthorized to delete this Power Source'}), 403
     
-    # Check if panel is involved in an active rental
     cursor.execute(
         "SELECT id FROM rentals WHERE solar_panel_id = %s AND status = %s",
         (panel_id, 'active')
@@ -384,16 +369,14 @@ def delete_solar_panel(panel_id):
     if active_rental:
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Cannot delete solar panel with active rental'}), 400
+        return jsonify({'message': 'Cannot delete Power Source with active rental'}), 400
     
-    # Delete the panel
     cursor.execute("DELETE FROM solar_panels WHERE id = %s", (panel_id,))
     conn.commit()
     cursor.close()
     conn.close()
-    return jsonify({'message': 'Solar panel deleted successfully'}), 200
+    return jsonify({'message': 'Power source deleted successfully'}), 200
 
-# Rent a solar panel
 @app.route('/rentals', methods=['POST'])
 @jwt_required()
 def rent_solar_panel():
@@ -407,7 +390,6 @@ def rent_solar_panel():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if panel exists and is available
     cursor.execute(
         "SELECT is_available, owner_id FROM solar_panels WHERE id = %s",
         (solar_panel_id,)
@@ -417,19 +399,18 @@ def rent_solar_panel():
     if not panel:
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Solar panel not found'}), 404
+        return jsonify({'message': 'Power Source not found'}), 404
     
     if not panel['is_available']:
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Solar panel not available'}), 400
+        return jsonify({'message': 'Power Source not available'}), 400
     
     if panel['owner_id'] == int(user_id):
         cursor.close()
         conn.close()
-        return jsonify({'message': 'Cannot rent your own solar panel'}), 400
+        return jsonify({'message': 'Cannot rent your own Power Source'}), 400
     
-    # Create rental record and mark panel as unavailable
     cursor.execute(
         "INSERT INTO rentals (user_id, solar_panel_id) VALUES (%s, %s) RETURNING id",
         (user_id, solar_panel_id)
@@ -442,9 +423,8 @@ def rent_solar_panel():
     conn.commit()
     cursor.close()
     conn.close()
-    return jsonify({'message': 'Solar panel rented successfully', 'rental_id': rental_id}), 201
+    return jsonify({'message': 'Power Source rented successfully', 'rental_id': rental_id}), 201
 
-# List user's rentals
 @app.route('/rentals', methods=['GET'])
 @jwt_required()
 def list_rentals():
@@ -475,7 +455,6 @@ def list_rentals():
         } for rental in rentals
     ]), 200
     
-# Cancel a rental
 @app.route('/rentals/<int:rental_id>/cancel', methods=['POST'])
 @jwt_required()
 def cancel_rental(rental_id):
@@ -484,7 +463,6 @@ def cancel_rental(rental_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if rental exists and belongs to the user
     cursor.execute(
         "SELECT user_id, solar_panel_id, status FROM rentals WHERE id = %s",
         (rental_id,)
@@ -501,19 +479,16 @@ def cancel_rental(rental_id):
         conn.close()
         return jsonify({'message': 'Unauthorized to cancel this rental'}), 403
     
-    # Check if rental is in a state that can be canceled
     if rental['status'] != 'active':
         cursor.close()
         conn.close()
         return jsonify({'message': f'Cannot cancel a rental with status: {rental["status"]}'}), 400
     
-    # Update rental status to 'canceled'
     cursor.execute(
         "UPDATE rentals SET status = 'canceled' WHERE id = %s",
         (rental_id,)
     )
     
-    # Make the solar panel available again
     cursor.execute(
         "UPDATE solar_panels SET is_available = TRUE WHERE id = %s",
         (rental['solar_panel_id'],)
