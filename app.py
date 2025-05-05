@@ -5,10 +5,14 @@ from flask_jwt_extended import (
     JWTManager, create_access_token,
     jwt_required, get_jwt, get_jwt_identity
 )
+from werkzeug.utils import secure_filename
 import psycopg2
 from psycopg2 import extras
 from psycopg2.errors import IntegrityError
 import os
+import secrets
+
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -18,6 +22,10 @@ CORS(app, resources={r"/*": {"origins": "http://localhost:4200"}})
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')
 app.config['JWT_BLACKLIST_ENABLED'] = True
 app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ['access']
+
+UPLOAD_FOLDER = 'static/profile_pics'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
@@ -102,6 +110,233 @@ def signout():
     jti = get_jwt()["jti"]
     blacklist.add(jti)
     return jsonify({"message": "Successfully signed out"}), 200
+
+
+UPLOAD_FOLDER = 'static/profile_pics'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def save_picture(file):
+    random_hex = secrets.token_hex(8)
+    _, f_ext = os.path.splitext(file.filename)
+    picture_fn = random_hex + f_ext
+    picture_path = os.path.join(app.root_path, UPLOAD_FOLDER, picture_fn)
+    
+    output_size = (300, 300)
+    i = Image.open(file)
+    i.thumbnail(output_size)
+    i.save(picture_path)
+    
+    return picture_fn
+
+@app.route('/api/profile', methods=['GET'])
+@jwt_required()
+def get_profile():
+    user_id = get_jwt_identity()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, full_name, email, contact_number, profile_picture FROM user_rent WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    
+    user_dict = dict(user)
+    
+    if user_dict.get('profile_picture'):
+        user_dict['profile_picture_url'] = request.host_url + 'static/profile_pics/' + user_dict['profile_picture']
+    
+    return jsonify(user_dict), 200
+
+@app.route('/api/profile', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    user_id = get_jwt_identity()
+    
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        data = request.form
+        profile_pic = request.files.get('profile_picture')
+    else:
+        data = request.get_json()
+        profile_pic = None
+    
+    full_name = data.get('full_name')
+    email = data.get('email')
+    contact_number = data.get('contact_number')
+    
+    if not full_name or not email:
+        return jsonify({'message': 'Full name and email are required'}), 400
+    
+    if contact_number and (len(contact_number.strip()) < 7 or len(contact_number.strip()) > 20):
+        return jsonify({'message': 'Contact number must be between 7 and 20 characters'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM user_rent WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'User not found'}), 404
+    
+    if email != user['email']:
+        cursor.execute("SELECT * FROM user_rent WHERE email = %s AND id != %s", (email, user_id))
+        existing_user = cursor.fetchone()
+        if existing_user:
+            cursor.close()
+            conn.close()
+            return jsonify({'message': 'Email already in use by another account'}), 400
+    
+    picture_filename = None
+    if profile_pic and profile_pic.filename:
+        if not allowed_file(profile_pic.filename):
+            cursor.close()
+            conn.close()
+            return jsonify({'message': 'Invalid file format. Allowed formats: png, jpg, jpeg, gif'}), 400
+        
+        picture_filename = save_picture(profile_pic)
+        
+        if user['profile_picture'] and os.path.exists(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture'])):
+            try:
+                os.remove(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture']))
+            except Exception as e:
+                print(f"Error removing old profile picture: {e}")
+    
+    try:
+        if picture_filename:
+            cursor.execute(
+                "UPDATE user_rent SET full_name = %s, email = %s, contact_number = %s, profile_picture = %s WHERE id = %s",
+                (full_name, email, contact_number, picture_filename, user_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE user_rent SET full_name = %s, email = %s, contact_number = %s WHERE id = %s",
+                (full_name, email, contact_number, user_id)
+            )
+        
+        conn.commit()
+        
+        cursor.execute("SELECT id, full_name, email, contact_number, profile_picture FROM user_rent WHERE id = %s", (user_id,))
+        updated_user = cursor.fetchone()
+        updated_user_dict = dict(updated_user)
+        
+        if updated_user_dict.get('profile_picture'):
+            updated_user_dict['profile_picture_url'] = request.host_url + 'static/profile_pics/' + updated_user_dict['profile_picture']
+        
+        return jsonify({'message': 'Profile updated successfully', 'user': updated_user_dict}), 200
+    
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'message': f'Error updating profile: {str(e)}'}), 500
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/profile/picture', methods=['PUT'])
+@jwt_required()
+def update_profile_picture():
+    user_id = get_jwt_identity()
+    
+    if 'profile_picture' not in request.files:
+        return jsonify({'message': 'No file part in the request'}), 400
+    
+    profile_pic = request.files['profile_picture']
+    
+    if not profile_pic or not profile_pic.filename:
+        return jsonify({'message': 'No file selected'}), 400
+    
+    if not allowed_file(profile_pic.filename):
+        return jsonify({'message': 'Invalid file format. Allowed formats: png, jpg, jpeg, gif'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM user_rent WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'User not found'}), 404
+    
+    try:
+        picture_filename = save_picture(profile_pic)
+        
+        if user['profile_picture'] and os.path.exists(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture'])):
+            try:
+                os.remove(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture']))
+            except Exception as e:
+                print(f"Error removing old profile picture: {e}")
+        
+        cursor.execute(
+            "UPDATE user_rent SET profile_picture = %s WHERE id = %s",
+            (picture_filename, user_id)
+        )
+        
+        conn.commit()
+        
+        profile_pic_url = request.host_url + 'static/profile_pics/' + picture_filename
+        return jsonify({
+            'message': 'Profile picture updated successfully',
+            'profile_picture': picture_filename,
+            'profile_picture_url': profile_pic_url
+        }), 200
+    
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'message': f'Error updating profile picture: {str(e)}'}), 500
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/profile/picture', methods=['DELETE'])
+@jwt_required()
+def delete_profile_picture():
+    user_id = get_jwt_identity()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM user_rent WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user:
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'User not found'}), 404
+    
+    if not user['profile_picture']:
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'No profile picture to delete'}), 400
+    
+    try:
+        if os.path.exists(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture'])):
+            os.remove(os.path.join(app.root_path, UPLOAD_FOLDER, user['profile_picture']))
+        
+        cursor.execute("UPDATE user_rent SET profile_picture = NULL WHERE id = %s", (user_id,))
+        conn.commit()
+        
+        return jsonify({'message': 'Profile picture deleted successfully'}), 200
+    
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'message': f'Error deleting profile picture: {str(e)}'}), 500
+    
+    finally:
+        cursor.close()
+        conn.close()
 
 def is_user_subscribed(user_id):
     conn = get_db_connection()
